@@ -188,6 +188,32 @@
   .date-fields .w { width: 8mm; }
   .date-fields .week { margin-left: 2mm; }
 
+  .date-pick {
+    width: 8mm;
+    height: 8mm;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #b9c2cd;
+    border-radius: 2mm;
+    background: #fff;
+    color: #475467;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .date-pick:hover { background: #f2f6fd; color: #1f6feb; border-color: #1f6feb; }
+  .date-pick svg {
+    width: 5mm;
+    height: 5mm;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .date-picker { position: absolute; width: 0; height: 0; opacity: 0; border: 0; padding: 0; }
+
   .weather { display: flex; align-items: center; gap: 3mm; }
   .w-icon {
     width: 7mm;
@@ -686,7 +712,9 @@
 
     .toolbar,
     .suggest,
-    .modal-mask { display: none !important; }
+    .modal-mask,
+    .date-pick,
+    .date-picker { display: none !important; }
 
     .page-wrap { display: block; padding: 0; }
 
@@ -733,11 +761,11 @@
       </div>
       <div class="name-block">
         <div class="name-grid" id="nameGrid">
-          <div class="name-cell"><input type="text" maxlength="1" aria-label="姓名第1字"></div>
-          <div class="name-cell"><input type="text" maxlength="1" aria-label="姓名第2字"></div>
-          <div class="name-cell"><input type="text" maxlength="1" aria-label="姓名第3字"></div>
-          <div class="name-cell"><input type="text" maxlength="1" aria-label="姓名第4字"></div>
-          <div class="name-cell"><input type="text" maxlength="1" aria-label="姓名第5字"></div>
+          <div class="name-cell"><input type="text" aria-label="姓名第1字"></div>
+          <div class="name-cell"><input type="text" aria-label="姓名第2字"></div>
+          <div class="name-cell"><input type="text" aria-label="姓名第3字"></div>
+          <div class="name-cell"><input type="text" aria-label="姓名第4字"></div>
+          <div class="name-cell"><input type="text" aria-label="姓名第5字"></div>
         </div>
         <div class="name-tip">认真书写你的名字</div>
       </div>
@@ -745,6 +773,14 @@
 
     <section class="date-bar">
       <span class="date-label">日期 / Date</span>
+      <button type="button" class="date-pick" id="datePickBtn" aria-label="快速选择日期" title="快速选择日期">
+        <svg viewBox="0 0 24 24">
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2"></rect>
+          <path d="M3.5 9.5h17M8 3v4M16 3v4"></path>
+          <path d="M7.5 13h2M11.5 13h2M15.5 13h2M7.5 16.5h2M11.5 16.5h2"></path>
+        </svg>
+      </button>
+      <input type="date" id="datePicker" class="date-picker" tabindex="-1" aria-hidden="true">
       <span class="date-fields">
         <input type="text" id="year" class="y" inputmode="numeric" aria-label="年"> 年
         <input type="text" id="month" class="m" inputmode="numeric" aria-label="月"> 月
@@ -869,23 +905,23 @@
     { key: 'chinese', name: '语文', rows: 6 },
     { key: 'math',    name: '数学', rows: 5 },
     { key: 'english', name: '英语', rows: 4 },
-    { key: 'sport',   name: '运动', rows: 4 },
-    { key: 'other',   name: '其他', rows: 4 }
+    { key: 'sport',   name: '运动', rows: 2 },
+    { key: 'other',   name: '其他', rows: 6 }
   ];
 
   var DEFAULT_ITEMS = {
-    '语文': ['阅读20分钟', '读书笔记', '书法', '预习', '复习', '晨读'],
-    '数学': ['五三天天练', '每日一练', '单元测试', '浅奥', '口算'],
-    '英语': ['晨读', '背单词', '短文', '英语课', '口语', '听力'],
+    '语文': ['阅读20分钟', '读书笔记', '书法', '5步预习法', '晨读', '学校作业'],
+    '数学': ['五三天天练', '每日一练', '单元测试', '浅奥', '口算', '学校作业'],
+    '英语': ['晨读', '背单词', '短文', '英语课', '口语', '听力', '学校作业'],
     '运动': ['跳绳', '短跑', '长跑', '手球', '体能', '核心'],
-    '其他': ['牙齿管理', '腿型管理', '遛狗', '家务劳动']
+    '其他': ['牙齿管理', '腿型管理', '遛狗', '家务劳动', '7:40 出门', '9:30 前睡觉']
   };
 
   var TIME_LABELS = ['10', '20', '30', '40', '50', '60', '>60'];
 
   var HKEY = 'zl_history_v1';
   var SKEY = 'zl_state_v1';
-  var DKEY = 'zl_defaults_v1';
+  var DKEY = 'zl_defaults_v2';
 
   function load(key, fallback) {
     try {
@@ -1086,12 +1122,52 @@
 
   /* ---------- 姓名 ---------- */
   var nameInputs = Array.prototype.slice.call(document.querySelectorAll('.name-cell input'));
+
+  // 将输入/上屏的字符依次填入当前格及后续格（支持中文输入法与多字上屏）
+  function distributeName(el, idx, text) {
+    var chars = String(text || '').split('').filter(function (c) {
+      return c.trim();
+    });
+
+    if (!chars.length) {
+      el.value = '';
+      state.name[idx] = '';
+      saveSoon();
+      return;
+    }
+
+    for (var i = 0; i < chars.length && idx + i < nameInputs.length; i++) {
+      state.name[idx + i] = chars[i];
+      nameInputs[idx + i].value = chars[i];
+    }
+    if (el.value !== state.name[idx]) el.value = state.name[idx];
+    saveSoon();
+
+    var next = idx + chars.length;
+    if (next < nameInputs.length) {
+      nameInputs[next].focus();
+    } else {
+      el.blur();
+    }
+  }
+
   nameInputs.forEach(function (el, idx) {
     el.value = state.name[idx] || '';
-    el.addEventListener('input', function () {
-      state.name[idx] = el.value.slice(0, 1);
-      saveSoon();
-      if (el.value && nameInputs[idx + 1]) nameInputs[idx + 1].focus();
+
+    var composing = false;
+
+    el.addEventListener('compositionstart', function () {
+      composing = true;
+    });
+
+    el.addEventListener('compositionend', function () {
+      composing = false;
+      distributeName(el, idx, el.value);
+    });
+
+    el.addEventListener('input', function (e) {
+      if (composing || e.isComposing) return; // 拼音组合期间不处理、不跳格
+      distributeName(el, idx, el.value);
     });
   });
 
@@ -1124,14 +1200,79 @@
     }
   }
 
+  var weekdayEl = document.getElementById('weekday');
+
+  // 根据年月日计算周几；日期无效时返回 null
+  function computeWeekday(y, m, d) {
+    var n = parseInt(y, 10), mo = parseInt(m, 10), da = parseInt(d, 10);
+    if (!n || !mo || !da) return null;
+    var dt = new Date(n, mo - 1, da);
+    if (dt.getFullYear() !== n || dt.getMonth() !== mo - 1 || dt.getDate() !== da) return null;
+    return '日一二三四五六'.charAt(dt.getDay());
+  }
+
+  // 年月日有效时自动联动周几
+  function syncWeekday() {
+    var w = computeWeekday(state.date.y, state.date.m, state.date.d);
+    if (w) {
+      state.date.w = w;
+      weekdayEl.value = w;
+    }
+  }
+
   [['year', 'y'], ['month', 'm'], ['day', 'd'], ['weekday', 'w']].forEach(function (pair) {
     var el = document.getElementById(pair[0]);
     el.value = state.date[pair[1]] || '';
     el.addEventListener('input', function () {
       state.date[pair[1]] = el.value;
       state.autoDate = '';
+      if (pair[1] !== 'w') syncWeekday();
       saveSoon();
     });
+  });
+
+  /* 快速选择日期 */
+  var datePicker = document.getElementById('datePicker');
+  var datePickBtn = document.getElementById('datePickBtn');
+
+  function toDateInputValue(p) {
+    var n = parseInt(p.y, 10), mo = parseInt(p.m, 10), da = parseInt(p.d, 10);
+    if (!n || !mo || !da) return '';
+    function pad(x) { return (x < 10 ? '0' : '') + x; }
+    return n + '-' + pad(mo) + '-' + pad(da);
+  }
+
+  function applyDate(n, mo, da) {
+    var dt = new Date(n, mo - 1, da);
+    state.date = {
+      y: String(n),
+      m: String(mo),
+      d: String(da),
+      w: '日一二三四五六'.charAt(dt.getDay())
+    };
+    state.autoDate = '';
+    document.getElementById('year').value = state.date.y;
+    document.getElementById('month').value = state.date.m;
+    document.getElementById('day').value = state.date.d;
+    weekdayEl.value = state.date.w;
+    saveSoon();
+  }
+
+  datePickBtn.addEventListener('click', function () {
+    var v = toDateInputValue(state.date) || toDateInputValue(todayParts());
+    if (v) datePicker.value = v;
+    try {
+      datePicker.showPicker();
+    } catch (e) {
+      datePicker.focus();
+    }
+  });
+
+  datePicker.addEventListener('change', function () {
+    if (!datePicker.value) return;
+    var p = datePicker.value.split('-');
+    var n = parseInt(p[0], 10), mo = parseInt(p[1], 10), da = parseInt(p[2], 10);
+    if (n && mo && da) applyDate(n, mo, da);
   });
 
   /* ---------- 补充 / 评语 ---------- */
